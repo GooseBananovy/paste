@@ -6,6 +6,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/goosebananovy/paste/internal/storage"
 )
@@ -45,7 +47,22 @@ func (h *PasteHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ID, err := h.stg.Create(ctx, content)
+	var ttl *time.Duration
+	ttlStr := r.URL.Query().Get("ttl")
+
+	if len(ttlStr) != 0 {
+		ttlInt, err := strconv.Atoi(ttlStr)
+
+		if err != nil || ttlInt <= 0 {
+			http.Error(w, "invalid ttl: must be a positive number of seconds", http.StatusBadRequest)
+			return
+		}
+
+		t := time.Duration(ttlInt) * time.Second
+		ttl = &t
+	}
+
+	ID, err := h.stg.Create(ctx, content, ttl)
 	if err != nil {
 		log.Printf("failed to create: %v", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -74,7 +91,7 @@ func (h *PasteHandler) Get(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, storage.ErrNotFound) {
 			http.Error(w, "paste not found", http.StatusNotFound)
 		} else {
-			log.Printf("failed to delete: %v", err)
+			log.Printf("failed to get: %v", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 		}
 		return
@@ -98,7 +115,7 @@ func (h *PasteHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, storage.ErrNotFound) {
 			http.Error(w, "paste not found", http.StatusNotFound)
 		} else {
-			log.Printf("failed to get: %v", err)
+			log.Printf("failed to delete: %v", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 		}
 		return

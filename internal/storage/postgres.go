@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/goosebananovy/paste/internal/model"
@@ -26,11 +27,31 @@ func NewPostgresStorage(ctx context.Context, connString string) (*PostgresStorag
 		return nil, fmt.Errorf("failed to ping postgres: %w", err)
 	}
 
-	return &PostgresStorage{pool: pool}, nil
+	ps := &PostgresStorage{pool: pool}
+
+	go ps.cleanup(context.Background())
+
+	return ps, nil
 }
 
-func (ps *PostgresStorage) Create(ctx context.Context, content string) (ID string, err error) {
-	if err = ps.pool.QueryRow(ctx, "INSERT INTO pastes (content, created_at) VALUES ($1, $2) RETURNING id", content, time.Now()).Scan(&ID); err != nil {
+func (ps *PostgresStorage) cleanup(ctx context.Context) {
+	for {
+		time.Sleep(1 * time.Minute)
+		if _, err := ps.pool.Exec(ctx, "DELETE FROM pastes WHERE expires_at IS NOT NULL AND expires_at < NOW()"); err != nil {
+			log.Printf("failed to clean pastes: %v", err)
+		}
+	}
+}
+
+func (ps *PostgresStorage) Create(ctx context.Context, content string, ttl *time.Duration) (ID string, err error) {
+
+	var expiresAt *time.Time
+	if ttl != nil {
+		t := time.Now().Add(*ttl)
+		expiresAt = &t
+	}
+
+	if err = ps.pool.QueryRow(ctx, "INSERT INTO pastes (content, created_at, expires_at) VALUES ($1, $2, $3) RETURNING id", content, time.Now(), expiresAt).Scan(&ID); err != nil {
 		return "", fmt.Errorf("failed to create paste: %w", err)
 	}
 

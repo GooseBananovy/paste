@@ -17,12 +17,29 @@ type MemoryStorage struct {
 }
 
 func NewMemoryStorage() *MemoryStorage {
-	return &MemoryStorage{
+	ms := &MemoryStorage{
 		pool: make(map[string]*model.Paste),
+	}
+
+	go ms.cleanup()
+
+	return ms 
+}
+
+func (ms *MemoryStorage) cleanup() {
+	for {
+		time.Sleep(1 * time.Minute)
+		ms.mu.Lock()
+		for ID, paste := range ms.pool {
+			if paste.ExpiresAt != nil && time.Now().After(*paste.ExpiresAt) {
+				delete(ms.pool, ID)
+			}
+		}
+		ms.mu.Unlock()
 	}
 }
 
-func (ms *MemoryStorage) Create(ctx context.Context, content string) (ID string, err error) {
+func (ms *MemoryStorage) Create(ctx context.Context, content string, ttl *time.Duration) (ID string, err error) {
 	rawID := make([]byte, 4)
 
 	if _, err = rand.Read(rawID); err != nil {
@@ -31,12 +48,18 @@ func (ms *MemoryStorage) Create(ctx context.Context, content string) (ID string,
 
 	ID = hex.EncodeToString(rawID)
 
+	var expiresAt *time.Time
+	if ttl != nil {
+		t := time.Now().Add(*ttl)
+		expiresAt = &t
+	}
+
 	ms.mu.Lock()
 	ms.pool[ID] = &model.Paste{
 		ID:        ID,
 		Content:   content,
 		CreatedAt: time.Now(),
-		ExpiresAt: nil,
+		ExpiresAt: expiresAt,
 	}
 	ms.mu.Unlock()
 
